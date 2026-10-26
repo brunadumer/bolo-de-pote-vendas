@@ -66,6 +66,7 @@ h2{font-family:var(--display);font-weight:700;font-size:1.35rem;margin:22px 0 8p
 .pote .nome{font-weight:700;margin-top:8px;line-height:1.2;font-size:1rem}
 .pote .preco{font-family:var(--display);font-weight:700;color:var(--accent);font-size:1.15rem;line-height:1.1}
 .pote .resta{font-size:.82rem;color:var(--ink-2)}
+.pote .entrega{font-size:.82rem;color:var(--ink-2);font-weight:600}
 .pote[disabled]{cursor:not-allowed}
 .pote[disabled] .vidro{opacity:.55}
 .pote[disabled] .resta{color:var(--accent);font-weight:600}
@@ -163,7 +164,7 @@ pre.msg{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:12p
 <body>
 
 <header class="top">
-  <h1 class="loja" id="nomeLoja">Meus Potes</h1>
+  <h1 class="loja" id="nomeLoja">Drum Doces</h1>
   <div class="hoje" id="hojeTopo"></div>
 </header>
 
@@ -279,16 +280,28 @@ const dia = ts => new Date(ts).toLocaleDateString('pt-BR',{day:'2-digit',month:'
 const lerPreco = v => { const n = parseFloat(String(v).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.')); return isFinite(n) && n >= 0 ? Math.round(n*100)/100 : 0; };
 
 function padrao(){
-  const s = (nome, preco, cor) => ({id:uid(), nome, preco, estoque:10, base:10, cor});
-  return { loja:'Meus Potes', pix:'', pedidos:[], sabores:[
-    s('Maracujá',10,'maracuja'), s('Maracujá com brigadeiro preto',10,'maracujabrig'), s('Oreo',10,'oreo'),
-    s('Morango com suspiro',10,'morango'), s('Brigadeiro tradicional',10,'chocolate'), s('Dois amores',10,'doisamores')
+  const s = (nome, cor) => ({id:uid(), nome, preco:12.5, precoEntrega:15, estoque:10, base:10, cor});
+  return { v:2, loja:'Drum Doces', pix:'', pedidos:[], sabores:[
+    s('Maracujá','maracuja'), s('Maracujá com brigadeiro preto','maracujabrig'), s('Oreo','oreo'),
+    s('Morango com suspiro','morango'), s('Brigadeiro tradicional','chocolate'), s('Dois amores','doisamores')
   ]};
 }
+// v2: preço com entrega e nome Drum Doces; só troca o que ainda estava no padrão antigo
+function migrar(d){
+  if (d.v >= 2) return d;
+  if (!d.loja || d.loja === 'Meus Potes') d.loja = 'Drum Doces';
+  d.sabores.forEach(s => {
+    if (s.preco === 10) s.preco = 12.5;
+    if (s.precoEntrega == null) s.precoEntrega = Math.round((s.preco + 2.5)*100)/100;
+  });
+  d.v = 2;
+  return d;
+}
+const precoDe = (s, ent) => ent === 'Entrega' ? (s.precoEntrega ?? s.preco) : s.preco;
 function valido(d){ return d && Array.isArray(d.sabores) && Array.isArray(d.pedidos); }
 function carregarLocal(){ try { const r = localStorage.getItem(LS); const d = r && JSON.parse(r); return valido(d) ? d : null; } catch(e){ return null; } }
 
-let S = carregarLocal() || padrao();
+let S = migrar(carregarLocal() || padrao());
 let carrinho = {};
 let aba = 'vender', filtro = 'hoje';
 let ped = {pag:'Pix', ent:'Retirada'};
@@ -324,7 +337,7 @@ async function conectar(){
     const snap = await ref.get();
     docRef = ref;
     if (snap.exists && valido(snap.data())){
-      S = JSON.parse(JSON.stringify(snap.data()));
+      S = migrar(JSON.parse(JSON.stringify(snap.data())));
       try { localStorage.setItem(LS, JSON.stringify(S)); } catch(e){}
       carrinho = {};
       render();
@@ -372,7 +385,7 @@ function totaisHoje(){
 }
 
 function renderTopo(){
-  $('#nomeLoja').textContent = S.loja || 'Meus Potes';
+  $('#nomeLoja').textContent = S.loja || 'Drum Doces';
   document.title = (S.loja || 'Bolo de Pote') + ': vendas';
   const t = totaisHoje();
   $('#hojeTopo').innerHTML = `hoje<b>${brl(t.vendido)}</b>`;
@@ -393,6 +406,7 @@ function renderVender(){
           ${pote(s)}<span class="tabua"></span>
           <span class="nome">${esc(s.nome)}</span>
           <span class="preco">${brl(s.preco)}</span>
+          <span class="entrega">${brl(precoDe(s, 'Entrega'))} com entrega</span>
           <span class="resta">${esgot ? 'Esgotou' : (livre === 1 ? 'resta 1' : `restam ${livre}`)}</span>
         </button>
         ${q ? `<span class="qtd">${q}</span><button class="menos" data-menos="${s.id}" aria-label="Tirar um ${esc(s.nome)}">−</button>` : ''}
@@ -402,10 +416,10 @@ function renderVender(){
   renderCarrinho();
 }
 
-function itensCarrinho(){
+function itensCarrinho(ent){
   return Object.entries(carrinho).filter(([,q])=>q>0).map(([id,q]) => {
     const s = S.sabores.find(x => x.id === id);
-    return s ? {id, nome:s.nome, preco:s.preco, qtd:q} : null;
+    return s ? {id, nome:s.nome, preco:precoDe(s, ent), qtd:q} : null;
   }).filter(Boolean);
 }
 function renderCarrinho(){
@@ -466,7 +480,8 @@ function renderCardapio(){
         <input data-campo="nome" value="${esc(s.nome)}" aria-label="Nome do sabor" maxlength="40">
       </div>
       <div class="linha">
-        <label style="flex:1 1 100px"><span class="rot">Preço (R$)</span><input data-campo="preco" inputmode="decimal" value="${String(s.preco.toFixed(2)).replace('.',',')}"></label>
+        <label style="flex:1 1 100px"><span class="rot">Retirada (R$)</span><input data-campo="preco" inputmode="decimal" value="${String(s.preco.toFixed(2)).replace('.',',')}"></label>
+        <label style="flex:1 1 100px"><span class="rot">Com entrega (R$)</span><input data-campo="precoEntrega" inputmode="decimal" value="${String(precoDe(s, 'Entrega').toFixed(2)).replace('.',',')}"></label>
         <div class="estoque"><div><span class="rot">Estoque</span><div style="display:flex;align-items:center;gap:6px">
           <button data-est="-1" aria-label="Diminuir estoque">−</button><output>${s.estoque}</output><button data-est="1" aria-label="Aumentar estoque">+</button>
         </div></div></div>
@@ -496,7 +511,7 @@ function render(){
 function msgCardapio(){
   const disp = S.sabores.filter(s => s.estoque > 0);
   let t = `🍰 *${S.loja || 'Bolo de pote'}*\nCardápio de hoje:\n\n`;
-  t += disp.length ? disp.map(s => `• ${s.nome}: ${brl(s.preco)}`).join('\n') : 'Hoje esgotou tudo! Em breve tem mais.';
+  t += disp.length ? disp.map(s => `• ${s.nome}: ${brl(s.preco)} (${brl(precoDe(s, 'Entrega'))} com entrega)`).join('\n') : 'Hoje esgotou tudo! Em breve tem mais.';
   if (S.pix) t += `\n\nPix: ${S.pix}`;
   t += `\n\nMe chama aqui para fazer seu pedido!`;
   return t;
@@ -520,7 +535,6 @@ function toast(t){ const el = $('#toast'); el.textContent = t; el.classList.add(
 function abrirPedido(){
   const itens = itensCarrinho(); if (!itens.length) return;
   $('#pedLista').textContent = itens.map(i => `${i.qtd}× ${i.nome}`).join(', ');
-  $('#pedTotal').textContent = brl(itens.reduce((a,i)=>a+i.qtd*i.preco,0));
   $('#pedCliente').value = ''; $('#pedObs').value = '';
   ped = {pag:'Pix', ent:'Retirada'};
   const nomes = [...new Set(S.pedidos.map(p => p.cliente).filter(Boolean))].slice(0, 60);
@@ -531,9 +545,10 @@ function abrirPedido(){
 function renderOpcoes(){
   $('#pedPag').innerHTML = PAGAMENTOS.map(p => `<button class="chip" data-pag="${p}" aria-pressed="${ped.pag===p}">${p}</button>`).join('');
   $('#pedEnt').innerHTML = ['Retirada','Entrega'].map(e => `<button class="chip" data-ent="${e}" aria-pressed="${ped.ent===e}">${e === 'Retirada' ? 'Levou na hora' : 'Vou entregar'}</button>`).join('');
+  $('#pedTotal').textContent = brl(itensCarrinho(ped.ent).reduce((a,i)=>a+i.qtd*i.preco,0));
 }
 function registrar(){
-  const itens = itensCarrinho(); if (!itens.length) return;
+  const itens = itensCarrinho(ped.ent); if (!itens.length) return;
   const total = Math.round(itens.reduce((a,i)=>a+i.qtd*i.preco,0)*100)/100;
   S.pedidos.unshift({
     id:uid(), ts:Date.now(), cliente:$('#pedCliente').value.trim(), obs:$('#pedObs').value.trim(),
@@ -580,13 +595,14 @@ document.addEventListener('change', e => {
   const card = e.target.closest('[data-sabor]'); if (!card) return;
   const s = S.sabores.find(x => x.id === card.dataset.sabor); if (!s) return;
   if (e.target.dataset.campo === 'nome'){ s.nome = e.target.value.trim() || 'Sabor sem nome'; }
-  if (e.target.dataset.campo === 'preco'){ s.preco = lerPreco(e.target.value); e.target.value = s.preco.toFixed(2).replace('.',','); }
+  const campo = e.target.dataset.campo;
+  if (campo === 'preco' || campo === 'precoEntrega'){ s[campo] = lerPreco(e.target.value); e.target.value = s[campo].toFixed(2).replace('.',','); }
   salvar();
 });
 $('#inLoja').addEventListener('input', e => { S.loja = e.target.value; renderTopo(); salvar(); });
 $('#inPix').addEventListener('input', e => { S.pix = e.target.value.trim(); salvar(); });
 $('#addSabor').addEventListener('click', () => {
-  S.sabores.push({id:uid(), nome:'Novo sabor', preco:10, estoque:10, base:10, cor:'chocolate'});
+  S.sabores.push({id:uid(), nome:'Novo sabor', preco:12.5, precoEntrega:15, estoque:10, base:10, cor:'chocolate'});
   salvar(); renderCardapio();
   const ins = document.querySelectorAll('#listaSabores [data-campo="nome"]');
   const ult = ins[ins.length-1]; if (ult){ ult.focus(); ult.select(); }
